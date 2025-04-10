@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "npx tsc index.ts && node index.js",
-    "build-linux": "docker build -t sea-node12 ."
+    "build": "npx pkg -t node12-linux,node12-win index.js"
   },
   "author": "",
   "license": "ISC",
