@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "npx tsc index.ts && node index.js",
-    "build": "npx pkg -t node12-linux,node12-win index.js"
+    "build": "npx tsc index.ts && pkg -t node12-linux,node12-win index.js"
   },
   "author": "",
   "license": "ISC",
@@ -14,5 +14,8 @@
     "@types/node": "^22.14.0",
     "pkg": "^5.8.1",
     "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "iconv-lite": "^0.6.3"
   }
 }

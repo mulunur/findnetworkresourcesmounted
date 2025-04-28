@@ -2,20 +2,35 @@ import { exec } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 const path = require("path");
+import * as iconv from "iconv-lite";
 
 interface NetworkResourceMounted {
-    device: string;     // Сетевой путь (//192.168.1.100/share)
+    path: string;       // Сетевой путь
     mountpoint: string; // Точка монтирования
     fstype: string;     // Файловая система
-    options: string;    // Опции монтирования
+    options: string;    // Другие характеристики сетевого ресурса
+}
+
+enum Platform {
+    Linux = "linux",
+    Win32 = "win32",
+}
+
+enum NetworkFSNames {
+    undefined = "",
+    prl_fs = "prl_fs",
+    nfs = "nfs",
+    cifs = "cifs",
+    smbfs = "smbfs",
+    sshfs = "sshfs",
 }
 
 function getNetworkResourcesMounts(): Promise<NetworkResourceMounted[]> {
-    const platform = os.platform();
+    const platform: NodeJS.Platform = os.platform();
 
-    if (platform === "linux") {
+    if (platform === Platform.Linux) {
         return getLinuxNetworkMounts();
-    } else if (platform === "win32") {
+    } else if (platform === Platform.Win32) {
         return getWindowsNetworkMounts();
     } else {
         return Promise.reject(`ОС ${platform} не поддерживается.`);
@@ -23,78 +38,116 @@ function getNetworkResourcesMounts(): Promise<NetworkResourceMounted[]> {
 }
 
 function getLinuxNetworkMounts(): Promise<NetworkResourceMounted[]> {
-    const paths = ["/proc/self/mountinfo", "/etc/mtab"]
+    const pathsToMountInfo = ["/proc/self/mountinfo", "/etc/fstab"];
+    enum FstabColumnNamesPosition {
+        path = 2,
+        mountpoint = 4,
+        fstype = 8,
+        options = 9,
+    };
+    enum MtabColumnNamesPosition {
+        path = 4, 
+        mountpoint = 3,
+        fstype = 8,
+        options = 9, 
+    };
     return new Promise(async (resolve, reject) => {
-        for (const path of paths) {
+        for (const path of pathsToMountInfo) {
             try {
                 const data = await fs.promises.readFile(path, "utf8");
                 const mounts: NetworkResourceMounted[] = data
                     .split("\n")
-                    .map(line => line.split(" "))
-                    .filter(parts => parts.length > 8 && (parts[8] === "cifs" || parts[8] === "nfs"))
+                    .map(line => line.split(/\s+/))
+                    .filter(parts => Object.values(NetworkFSNames).includes(parts[MtabColumnNamesPosition.fstype] as NetworkFSNames))
                     .map(parts => ({
-                        device: parts[2],
-                        mountpoint: parts[4],
-                        fstype: parts[8],
-                        options: parts[9]
+                        path: parts[MtabColumnNamesPosition.path],
+                        mountpoint: parts[MtabColumnNamesPosition.mountpoint],
+                        fstype: parts[MtabColumnNamesPosition.fstype],
+                        options: parts.slice(9).join(" "),
                     }));
                 resolve(mounts);
                 break;
             } catch (err) {
-                console.error("Ошибка чтения /proc/self/mountinfo:", err);
+                console.error(`Ошибка чтения ${path}:`, err);
             }
         }
-        reject()
+        reject();
     });
 }
 
-function getWindowsNetworkMounts(): Promise<NetworkResourceMounted[]> {
-    const shortcutSuffix = path.join("AppData", "Roaming", "Microsoft", "Windows", "Network Shortcuts");
-    const usersRoot = "C:\\Users";
-    const users = fs.readdirSync(usersRoot, { withFileTypes: true })
-        .filter(entry => entry.isDirectory())
-        .map(entry => entry.name);
+// function getWinShortcutTarget(networkShortcutPath: string): Promise<string | null> {
+//     const command = ``;
 
-    return new Promise((resolve, reject) => {
-        const mounts: NetworkResourceMounted[] = [];
+//     return new Promise((resolve, reject) => {
+//         exec(command, { encoding: "utf8" }, (error, stdout) => {
+//             if (error) {
+//                 console.warn("Не удалось получить сетевое расположение", error.message);
+//             } else {
+//                 resolve(stdout.trim());
+//             }
+//         });
+//     });
+// }
 
+async function getNetworkShortcutMountsAsync(): Promise<NetworkResourceMounted[]> {
+    const mounts: NetworkResourceMounted[] = [];
+    const networkShortcutSuffix = path.join("AppData", "Roaming", "Microsoft", "Windows", "Network Shortcuts");
+    const usersDirectory = "C:\\Users";
+
+    try {
+        const userDirs = await fs.promises.readdir(usersDirectory, { withFileTypes: true });
+        const users = userDirs.filter(x => x.isDirectory()).map(d => d.name);
         for (const user of users) {
-            const shortcutPath = path.join(usersRoot, user, shortcutSuffix);
-            if (fs.existsSync(shortcutPath)) {
-                const files = fs.readdirSync(shortcutPath);
-                for (const file of files) {
+            const shortcutPath = path.join(usersDirectory, user, networkShortcutSuffix);
+            try {
+                const networkShortcuts = await fs.promises.readdir(shortcutPath);
+                for (const shortcut of networkShortcuts) {
                     mounts.push({
-                        device: path.join(shortcutPath, file),
+                        path: path.join(shortcutPath, shortcut),
                         mountpoint: "",
-                        fstype: "cifs",
-                        options: ""
+                        fstype: NetworkFSNames.undefined,
+                        options: "Network Folder"
                     });
                 }
+            } catch (_) {
             }
         }
+    } catch (e) {
+        // Не удалось прочитать пользователей
+    }
+    return mounts;
+}
 
-        exec("net use", { encoding: "utf8" }, (error, stdout, stderr) => {
+function getNetUseMounts(): Promise<NetworkResourceMounted[]> {
+    return new Promise((resolve) => {
+        exec("chcp 65001 && net use", { encoding: "buffer" }, (error, stdout, stderr) => {
+            const mounts: NetworkResourceMounted[] = [];
+
             if (error) {
-                reject(error);
-                return;
+                console.warn("Не удалось получить сетевые устройства через net use:", error.message);
+                return resolve([]);
             }
 
-            const lines = stdout.split("\n")
-                .map(line => line.trim())
-                .filter(line => line && !line.startsWith("Status") && !line.startsWith("---") && !line.includes("The command completed"));
+            const decodedOutput = iconv.decode(stdout, "win1251");
 
-            for (const line of lines) {
-                const parts = line.split(/\s+/);
+            let cleanedOutput = decodedOutput
+                .replace(/(Состояние.*|---.*|Команда выполнена успешно.*|Active code page: 65001.*|New connections will be remembered.*|Status.*|The command completed successfully.*)/gi, '')
+                .trim()
+                .replace(/\r?\n\s*/g, '  ');
 
-                if (parts.length >= 3) {
-                    const [status, local, remote] = parts;
-                    mounts.push({
-                        device: remote,
-                        mountpoint: local,
-                        fstype: "cifs",
-                        options: status
-                    });
-                }
+            const parts = cleanedOutput.split(/\s{2,}/).filter(Boolean);
+
+            for (let i = 0; i + 2 < parts.length; i += 3) {
+                const local = parts[i];
+                const remote = parts[i + 1];
+                const networkType = parts[i + 2];
+
+                mounts.push({
+                    path: remote,
+                    mountpoint: local,
+                    fstype: NetworkFSNames.undefined,
+                    options: networkType
+                });
             }
 
             resolve(mounts);
@@ -102,9 +155,18 @@ function getWindowsNetworkMounts(): Promise<NetworkResourceMounted[]> {
     });
 }
 
+export async function getWindowsNetworkMounts(): Promise<NetworkResourceMounted[]> {
+    const shortcuts = await getNetworkShortcutMountsAsync();
+
+    return getNetUseMounts().then((netUseMounts) => {
+        return [...shortcuts, ...netUseMounts];
+    });
+}
+
+
 getNetworkResourcesMounts()
     .then(mounts => {
-        console.log("Сетевые диски:", mounts);
+        console.log(mounts);
     })
     .catch(err => {
         console.error("Ошибка:", err);
