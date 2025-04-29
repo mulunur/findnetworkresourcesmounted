@@ -1,7 +1,8 @@
-import { exec } from "child_process";
+import { exec, execFile } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 const path = require("path");
+import * as util from "util";
 import * as iconv from "iconv-lite";
 
 interface NetworkResourceMounted {
@@ -91,7 +92,7 @@ function getLinuxNetworkMounts(): Promise<NetworkResourceMounted[]> {
 
 async function getNetworkShortcutMountsAsync(): Promise<NetworkResourceMounted[]> {
     const mounts: NetworkResourceMounted[] = [];
-    const networkShortcutSuffix = path.join("AppData", "Roaming", "Microsoft", "Windows", "Network Shortcuts");
+    /*const networkShortcutSuffix = path.join("AppData", "Roaming", "Microsoft", "Windows", "Network Shortcuts");
     const usersDirectory = "C:\\Users";
 
     try {
@@ -114,6 +115,28 @@ async function getNetworkShortcutMountsAsync(): Promise<NetworkResourceMounted[]
         }
     } catch (e) {
         // Не удалось прочитать пользователей
+    }*/
+
+    const psScriptPath = path.resolve(__dirname, "./get-network-shortcuts.ps1");
+    const execFileAsync = util.promisify(execFile);
+    try {
+        const { stdout } = await execFileAsync("powershell", ["-File", psScriptPath]);
+        //const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScriptPath]);
+        const lines = stdout.trim().split(/\r?\n/);
+        for (const line of lines) {
+            const match = /^\[(.+?)\] => (.+)$/.exec(line);
+            if (match) {
+                const [, name, target] = match;
+                mounts.push({
+                    path: target,
+                    mountpoint: "",
+                    fstype: "networkShortcut",
+                    options: "Network Folder"
+                });
+            }
+        }
+    } catch (e) {
+        console.error("Failed to run PowerShell script:", e);
     }
     return mounts;
 }
