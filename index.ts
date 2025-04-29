@@ -76,46 +76,8 @@ function getLinuxNetworkMounts(): Promise<NetworkResourceMounted[]> {
     });
 }
 
-// function getWinShortcutTarget(networkShortcutPath: string): Promise<string | null> {
-//     const command = ``;
-
-//     return new Promise((resolve, reject) => {
-//         exec(command, { encoding: "utf8" }, (error, stdout) => {
-//             if (error) {
-//                 console.warn("Не удалось получить сетевое расположение", error.message);
-//             } else {
-//                 resolve(stdout.trim());
-//             }
-//         });
-//     });
-// }
-
 async function getNetworkShortcutMountsAsync(): Promise<NetworkResourceMounted[]> {
     const mounts: NetworkResourceMounted[] = [];
-    /*const networkShortcutSuffix = path.join("AppData", "Roaming", "Microsoft", "Windows", "Network Shortcuts");
-    const usersDirectory = "C:\\Users";
-
-    try {
-        const userDirs = await fs.promises.readdir(usersDirectory, { withFileTypes: true });
-        const users = userDirs.filter(x => x.isDirectory()).map(d => d.name);
-        for (const user of users) {
-            const shortcutPath = path.join(usersDirectory, user, networkShortcutSuffix);
-            try {
-                const networkShortcuts = await fs.promises.readdir(shortcutPath);
-                for (const shortcut of networkShortcuts) {
-                    mounts.push({
-                        path: path.join(shortcutPath, shortcut),
-                        mountpoint: "",
-                        fstype: NetworkFSNames.undefined,
-                        options: "Network Folder"
-                    });
-                }
-            } catch (_) {
-            }
-        }
-    } catch (e) {
-        // Не удалось прочитать пользователей
-    }*/
 
     const psScriptPath = path.resolve(__dirname, "./get-network-shortcuts.ps1");
     const execFileAsync = util.promisify(execFile);
