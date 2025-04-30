@@ -19,26 +19,27 @@ enum Platform {
 
 enum NetworkFSNames {
     undefined = "",
-    prl_fs = "prl_fs",
+    prlfs = "prl_fs",
     nfs = "nfs",
     cifs = "cifs",
     smbfs = "smbfs",
     sshfs = "sshfs",
 }
 
-function getNetworkResourcesMounts(): Promise<NetworkResourceMounted[]> {
+const getNetworkResourcesMounts = (): Promise<NetworkResourceMounted[]> => {
     const platform: NodeJS.Platform = os.platform();
 
     if (platform === Platform.Linux) {
         return getLinuxNetworkMounts();
     } else if (platform === Platform.Win32) {
         return getWindowsNetworkMounts();
-    } else {
-        return Promise.reject(`ОС ${platform} не поддерживается.`);
     }
+     else {
+        return Promise.reject(`ОС ${platform} не поддерживается.`);
+     }
 }
 
-function getLinuxNetworkMounts(): Promise<NetworkResourceMounted[]> {
+const getLinuxNetworkMounts = async (): Promise<NetworkResourceMounted[]> => {
     const pathsToMountInfo = ["/proc/self/mountinfo", "/etc/fstab"];
     enum FstabColumnNamesPosition {
         path = 2,
@@ -59,7 +60,8 @@ function getLinuxNetworkMounts(): Promise<NetworkResourceMounted[]> {
                 const mounts: NetworkResourceMounted[] = data
                     .split("\n")
                     .map(line => line.split(/\s+/))
-                    .filter(parts => Object.values(NetworkFSNames).includes(parts[MtabColumnNamesPosition.fstype] as NetworkFSNames))
+                    .filter(parts => 
+                        Object.values(NetworkFSNames).includes(parts[MtabColumnNamesPosition.fstype] as NetworkFSNames))
                     .map(parts => ({
                         path: parts[MtabColumnNamesPosition.path],
                         mountpoint: parts[MtabColumnNamesPosition.mountpoint],
@@ -69,21 +71,37 @@ function getLinuxNetworkMounts(): Promise<NetworkResourceMounted[]> {
                 resolve(mounts);
                 break;
             } catch (err) {
-                console.error(`Ошибка чтения ${path}:`, err);
             }
         }
         reject();
     });
 }
 
-async function getNetworkShortcutMountsAsync(): Promise<NetworkResourceMounted[]> {
+const getNetworkShortcutMountsAsync = async (): Promise<NetworkResourceMounted[]> => {
     const mounts: NetworkResourceMounted[] = [];
-
-    const psScriptPath = path.resolve(__dirname, "./get-network-shortcuts.ps1");
     const execFileAsync = util.promisify(execFile);
+
+    const psScript = `
+        $networkShortcuts = "$env:APPDATA\\Microsoft\\Windows\\Network Shortcuts"
+        if (-Not (Test-Path $networkShortcuts)) { exit }
+        $shell = New-Object -ComObject Shell.Application
+        $folder = $shell.NameSpace($networkShortcuts)
+        if ($null -eq $folder) { exit }
+        foreach ($item in $folder.Items()) {
+            if ($item.IsLink) {
+                $target = $item.GetLink().Path
+                Write-Output "[$($item.Name)] => $target"
+            }
+        }
+    `;
+
     try {
-        const { stdout } = await execFileAsync("powershell", ["-File", psScriptPath]);
-        //const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", psScriptPath]);
+        const { stdout } = await execFileAsync("powershell", [
+            "-NoProfile",
+            "-ExecutionPolicy",
+             "Bypass",
+            "-Command", psScript
+        ]);
         const lines = stdout.trim().split(/\r?\n/);
         for (const line of lines) {
             const match = /^\[(.+?)\] => (.+)$/.exec(line);
@@ -92,36 +110,39 @@ async function getNetworkShortcutMountsAsync(): Promise<NetworkResourceMounted[]
                 mounts.push({
                     path: target,
                     mountpoint: "",
-                    fstype: "networkShortcut",
+                    fstype: "",
                     options: "Network Folder"
                 });
             }
         }
     } catch (e) {
-        console.error("Failed to run PowerShell script:", e);
     }
+    
     return mounts;
 }
 
-function getNetUseMounts(): Promise<NetworkResourceMounted[]> {
+const getNetUseMounts = (): Promise<NetworkResourceMounted[]> => {
     return new Promise((resolve) => {
-        exec("chcp 65001 && net use", { encoding: "buffer" }, (error, stdout, stderr) => {
+        const encoding = "chcp 65001"
+        const command = "net use"
+
+        exec(`${encoding} && ${command}`, { encoding: "buffer" }, (error, stdout, stderr) => {
             const mounts: NetworkResourceMounted[] = [];
 
             if (error) {
-                console.warn("Не удалось получить сетевые устройства через net use:", error.message);
-                return resolve([]);
+                return resolve(mounts);
             }
 
-            const decodedOutput = iconv.decode(stdout, "win1251");
+            const lines = iconv.decode(stdout, "win1251")
+            .replace(/^(-+)$/gm, '') // удаление "-----------"-строк
+            .split('\n')
+            .map((line) => line.replace(/[\r\n]/g, ''))
+            .filter(Boolean)         // удаление пустых строк
+            .slice(1)                // удаление первой строки ("New connections...")
+            .slice(1)                // удаление заголовков таблицы ("Status   Local...")
+            .slice(0, -1);           // удаление последней строки ("The command completed...")
 
-            let cleanedOutput = decodedOutput
-                .replace(/(Состояние.*|---.*|Команда выполнена успешно.*|Active code page: 65001.*|New connections will be remembered.*|Status.*|The command completed successfully.*)/gi, '')
-                .trim()
-                .replace(/\r?\n\s*/g, '  ');
-
-            const parts = cleanedOutput.split(/\s{2,}/).filter(Boolean);
-
+            const parts = lines;
             for (let i = 0; i + 2 < parts.length; i += 3) {
                 const local = parts[i];
                 const remote = parts[i + 1];
@@ -140,14 +161,11 @@ function getNetUseMounts(): Promise<NetworkResourceMounted[]> {
     });
 }
 
-export async function getWindowsNetworkMounts(): Promise<NetworkResourceMounted[]> {
-    const shortcuts = await getNetworkShortcutMountsAsync();
-
-    return getNetUseMounts().then((netUseMounts) => {
-        return [...shortcuts, ...netUseMounts];
-    });
+const getWindowsNetworkMounts = async(): Promise<NetworkResourceMounted[]> => {
+    const networkShortcuts = await getNetworkShortcutMountsAsync();
+    const networkMounts = await getNetUseMounts();
+    return [...networkShortcuts, ...networkMounts];
 }
-
 
 getNetworkResourcesMounts()
     .then(mounts => {
