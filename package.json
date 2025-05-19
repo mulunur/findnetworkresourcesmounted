@@ -5,11 +5,22 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "npx tsc index.ts && node index.js",
-    "build": "npx tsc index.ts && pkg -t node12-linux,node12-win index.js"
+    "build-command": "npx tsc index.ts && pkg -t node12-linux,node12-win index.js",
+    "build": "npx tsc index.ts && pkg ."
   },
   "author": "",
   "license": "ISC",
   "description": "",
+  "bin": "index.js",
+  "pkg": {
+    "assets": [
+      "winnetwork.node"
+    ],
+    "targets": [
+    "node12-linux",
+    "node12-win"
+    ]
+  },
   "devDependencies": {
     "@types/node": "^22.14.0",
     "pkg": "^5.8.1",
