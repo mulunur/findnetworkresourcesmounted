@@ -5,7 +5,7 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "npx tsc index.ts && node index.js",
-    "build-command": "npx tsc index.ts && pkg -t node12-linux,node12-win index.js",
+    "build-command": "npx tsc index.ts && pkg -t node12-linux,node12-win .",
     "build": "npx tsc index.ts && pkg ."
   },
   "author": "",
@@ -17,8 +17,8 @@
       "winnetwork.node"
     ],
     "targets": [
-    "node12-linux",
-    "node12-win"
+      "node12-linux",
+      "node12-win"
     ]
   },
   "devDependencies": {
@@ -27,6 +27,8 @@
     "typescript": "^5.8.2"
   },
   "dependencies": {
-    "iconv-lite": "^0.6.3"
+    "@types/xml2js": "^0.4.14",
+    "iconv-lite": "^0.6.3",
+    "xml2js": "^0.6.2"
   }
 }
